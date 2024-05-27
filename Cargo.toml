@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+    "client-app",
+    "sha1",
+    "embedded-app",
+]
+exclude = [
+]
+
+
+[profile.dev]
+# Rust debug runs too slow for embedded. 
+# For debug builds always builds with some optimization
+opt-level = "s"
+
+#Build all dependencies with optimizations
+[profile.dev.package."*"]
+opt-level = "s"
+debug-assertions = false
+
+[profile.release]
+codegen-units = 1 # LLVM can perform better optimizations using a single thread
+debug = 2 
+debug-assertions = false
+incremental = false
+lto = 'fat'
+opt-level = 's'
+overflow-checks = false
+
+
+
+
