@@ -1,13 +1,31 @@
-use eframe::egui;
-//use ewebsock::{WsSender, WsReceiver, WsEvent, WsMessage};
+
+use std::{sync::Arc, vec};
+
+use eframe::egui::{self, mutex::Mutex};
+use ewebsock::{WsEvent, WsReceiver, WsSender};
+use crate::{home_page::HomePage, settings_page::SettingsPage};
+
+use messages;
 
 pub struct ClientApp{
+    pages: Vec<Box<dyn AppPage>>,
+    current_page: usize,
+    devices: Arc<Mutex<Vec<IoTDevice>>>,
 }
 
 impl Default for ClientApp{
     fn default() -> Self {
-        Self {
-        }
+        let mut s = Self {
+            pages: Vec::new(),
+            current_page: 0,
+            devices: Arc::new(Mutex::new(vec![
+                IoTDevice::new("Easy IoT Device 1"),
+                IoTDevice::new("Easy IoT Device 2"),
+            ])),
+        };
+        s.pages.push(Box::new(HomePage::new(s.devices.clone())));
+        s.pages.push(Box::new(SettingsPage::new(s.devices.clone())));
+        s
     }
 }
 
@@ -26,14 +44,126 @@ impl eframe::App for ClientApp{
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 egui::widgets::global_dark_light_mode_switch(ui);
+                for (i, page) in self.pages.iter().enumerate() {
+                    let name = egui::RichText::new(page.name()).heading();
+                    if i == self.current_page {
+                        ui.heading(name).highlight();
+                    } 
+                    else if ui.button(name).clicked() {
+                        self.current_page = i;
+                    }
+                }
             });
         });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Hello World!");
-            ui.label("This is a test of the eframe library.");
+        egui::CentralPanel::default().show(ctx, |_ui| {
+            self.pages[self.current_page].show(ctx);
         });
+
+        let mut devices = self.devices.lock();
+        for device in devices.iter_mut(){
+            device.update();
+        }
+        drop(devices);
     }
 }
 
 
+pub trait AppPage {
+    fn name(& self) -> &str;
+    fn show(&mut self, ctx: &eframe::egui::Context);
+}
+
+#[derive(PartialEq)]
+pub enum IoTDeviceWsState {
+    Disconnect,
+    Pending,
+    Connected,
+}
+
+pub struct IoTDevice{
+    pub name: String,
+    pub ip: String,
+    pub ws_sender: Option<WsSender>,
+    pub ws_receiver: Option<WsReceiver>,
+    pub ws_state: IoTDeviceWsState,
+    pub error: Option<String>,
+    pub inpox: Vec<ewebsock::WsMessage>
+}
+
+impl IoTDevice{
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            ip: "".to_string(),
+            ws_sender: None,
+            ws_receiver: None,
+            ws_state: IoTDeviceWsState::Disconnect,
+            error: None,
+            inpox: Vec::new(),
+        }
+    }
+
+    pub fn connect(&mut self, ctx: egui::Context){
+        if self.ws_state != IoTDeviceWsState::Disconnect{
+            self.error = Some("Already connected".to_string());
+            return;
+        }
+        let url = format!("ws://{}", self.ip);
+        let options = ewebsock::Options::default();
+        let wakeup = move || ctx.request_repaint(); // wake up UI thread on new message
+        //let _res = ewebsock::connect_with_wakeup(url, options, wakeup);
+        match ewebsock::connect_with_wakeup(url, options, wakeup){
+            Ok((sender, resiever)) => {
+                self.ws_sender = Some(sender);
+                self.ws_receiver = Some(resiever);
+                self.ws_state = IoTDeviceWsState::Pending;
+                self.error = None;
+            }
+            Err(e) => {
+                self.error = Some(format!("Error: {}", e));
+            }
+        }
+    }
+
+    pub fn disconnect(&mut self){
+        if self.ws_state != IoTDeviceWsState::Connected{
+            self.error = Some("Already disconnected".to_string());
+            return;
+        }
+        self.ws_sender = None;
+        self.ws_receiver = None;
+        self.ws_state = IoTDeviceWsState::Disconnect;
+        self.error = None;
+    }
+
+    pub fn update(&mut self){
+        if let Some(receiver) = &self.ws_receiver {
+            while let Some(event) = receiver.try_recv() {
+                match event{
+                    WsEvent::Message(msg) => {
+                        self.inpox.push(msg);
+                        self.error = None;
+                    },
+                    WsEvent::Error(e) => {
+                        self.error = Some(format!("Error: {}", e));
+                    },
+                    WsEvent::Closed => {
+                        self.ws_state = IoTDeviceWsState::Disconnect;
+                        self.error = None;
+                    }
+                    WsEvent::Opened => {
+                        self.ws_state = IoTDeviceWsState::Connected;
+                        self.error = None;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn send(&mut self, msg: &messages::Message){
+        if let Some(sender) = &mut self.ws_sender {
+            sender.send(ewebsock::WsMessage::Text(msg.to_str().to_string()));
+        }
+    }
+}
 

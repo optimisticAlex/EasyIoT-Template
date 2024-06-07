@@ -3,7 +3,7 @@ resolver = "2"
 members = [
     "client-app",
     "sha1",
-    "embedded-app",
+    "embedded-app", "messages",
 ]
 exclude = [
 ]

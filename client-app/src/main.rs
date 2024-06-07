@@ -1,5 +1,7 @@
 
 mod app;
+mod settings_page;
+mod home_page;
 use app::ClientApp;
 
 #[cfg(not(target_arch = "wasm32"))]
