@@ -1,5 +1,7 @@
 #![no_std]
 
+pub const MESSAGE_PORT: u16 = 420;
+
 #[derive(core::fmt::Debug)]
 pub enum Message{
     On,

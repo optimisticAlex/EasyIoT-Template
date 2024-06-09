@@ -1,48 +1,51 @@
+use crate::{
+    app,
+    connection_manager::ConnectionManager,
+};
+use messages::Message;
+use eframe::egui;
 
-use std::sync::Arc;
 
-use crate::app;
-use eframe::egui::{self, mutex::Mutex};
-
-use messages;
 
 pub struct HomePage {
-    name: String,
-    devices: Arc<Mutex<Vec<app::IoTDevice>>>,
+    on: bool,
 }
 
 impl HomePage {
-    pub fn new(devices: Arc<Mutex<Vec<app::IoTDevice>>>) -> Self {
+    pub fn new() -> Self {
         Self {
-            name: "🏠Home".to_string(),
-            devices,
+            on: false,
         }
     }
 }
 
 impl app::AppPage for HomePage {
-    fn name(&self) -> &str {
-        &self.name
-    }
+    fn name(&self) -> &str {"Home"}
 
-    fn show(&mut self, _ctx: &eframe::egui::Context) {
+    fn emote(&self) -> &str {"🏠"}
+
+    fn show(&mut self, _ctx: &eframe::egui::Context, connetions: &mut ConnectionManager) {
         egui::CentralPanel::default().show(_ctx, |ui| {
-            let mut devices = self.devices.lock();
-            for d in devices.iter_mut() {
-                if d.ws_state == app::IoTDeviceWsState::Connected {
-                    ui.horizontal(|ui|{
-                        ui.label(&d.name);
-                        if ui.button("On").clicked(){
-                            d.send(&messages::Message::On);
-                        }
-                        if ui.button("Off").clicked(){
-                            d.send(&messages::Message::Off);
-                        }
-                    });
-                } else {
-                    ui.label(format!("{} is not connected", d.name));
+            ui.vertical_centered(|ui|{
+                ui.add_space(ui.available_height()*0.42);
+                if connetions.connection_count() == 0{
+                    ui.label("No devices connected").highlight();
                 }
-            }
+                else{
+                    if self.on{
+                        if ui.button(egui::RichText::new("OFF").size(42.).color(egui::Color32::RED)).clicked(){
+                            self.on = false;
+                            connetions.send_to_all(&Message::Off);
+                        }
+                    }
+                    else{
+                        if ui.button(egui::RichText::new("ON").size(42.).color(egui::Color32::GREEN)).clicked(){
+                            self.on = true;
+                            connetions.send_to_all(&Message::On);
+                        }
+                    }
+                }
+            });
         });
     }
 }

@@ -1,5 +1,6 @@
 
 mod app;
+mod connection_manager;
 mod settings_page;
 mod home_page;
 use app::ClientApp;
