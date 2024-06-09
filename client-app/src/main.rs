@@ -10,6 +10,14 @@ use eframe::{run_native, NativeOptions};
 #[cfg(target_arch = "wasm32")]
 use eframe::{WebOptions, WebRunner};
 
+#[cfg(target_arch = "wasm32")]
+mod js_functions{
+    use wasm_bindgen::prelude::*;
+    #[wasm_bindgen]
+    extern "C" {
+        pub fn hide_loading_animation();
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
@@ -22,6 +30,7 @@ fn main() {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
+    js_functions::hide_loading_animation();
     let web_options = WebOptions {
         ..Default::default()
     };

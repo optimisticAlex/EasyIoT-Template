@@ -343,6 +343,7 @@ dependencies = [
  "ewebsock",
  "heapless 0.8.0",
  "messages",
+ "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
 
