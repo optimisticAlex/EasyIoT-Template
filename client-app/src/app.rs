@@ -11,6 +11,8 @@ pub struct ClientApp{
     pages: Vec<Box<dyn AppPage>>,
     current_page: usize,
     devices: Arc<Mutex<Vec<IoTDevice>>>,
+    host_ip: String,
+    initialized: bool,
 }
 
 impl Default for ClientApp{
@@ -22,6 +24,8 @@ impl Default for ClientApp{
                 IoTDevice::new("Easy IoT Device 1"),
                 IoTDevice::new("Easy IoT Device 2"),
             ])),
+            host_ip: String::new(),
+            initialized: false,
         };
         s.pages.push(Box::new(HomePage::new(s.devices.clone())));
         s.pages.push(Box::new(SettingsPage::new(s.devices.clone())));
@@ -30,17 +34,30 @@ impl Default for ClientApp{
 }
 
 impl ClientApp{
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(_cc: &eframe::CreationContext<'_>, ip: String) -> Self {
         // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         // Restore app state using cc.storage (requires the "persistence" feature).
         // Use the cc.gl (a glow::Context) to create graphics shaders and buffers that you can use
         // for e.g. egui::PaintCallback.
-        Self::default()
+        let mut s = Self::default();
+        s.host_ip = ip;
+        s
+    }
+
+    fn init(&mut self, ctx: &egui::Context){
+        self.initialized = true;
+        for device in self.devices.lock().iter_mut(){
+            device.ip = self.host_ip.clone()+":420";
+            device.connect(ctx.clone());
+            break;
+        }
     }
 }
 
 impl eframe::App for ClientApp{
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+        if !self.initialized {self.init(ctx);}
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 egui::widgets::global_dark_light_mode_switch(ui);
