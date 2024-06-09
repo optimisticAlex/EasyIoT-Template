@@ -1,2 +1,3 @@
 target
 client-app/dist
+embedded-app/src/client_app.rs

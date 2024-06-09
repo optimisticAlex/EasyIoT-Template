@@ -12,6 +12,7 @@ use embedded_io::ReadReady;
 
 use sha1::compute_sha1;
 use messages::Message;
+use super::client_app;
 
 pub async fn wait_for_wifi_connection(stack: &'static Stack<esp_wifi::wifi::WifiDevice<'static, esp_wifi::wifi::WifiStaDevice>>){
     loop {
@@ -34,149 +35,7 @@ pub async fn wait_for_wifi_connection(stack: &'static Stack<esp_wifi::wifi::Wifi
         Timer::after(Duration::from_millis(500)).await;
     }
 }
-/* 
-#[embassy_executor::task]
-pub async fn websocket_echo_server(stack: &'static Stack<esp_wifi::wifi::WifiDevice<'static, esp_wifi::wifi::WifiStaDevice>>) {
-    use heapless::String;
-    loop{
-        let mut rx_buffer = [0; 4096];
-        let mut tx_buffer = [0; 4096];
-        let mut socket = embassy_net::tcp::TcpSocket::new(&stack, &mut rx_buffer, &mut tx_buffer);
-        socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
-        socket.set_keep_alive(Some(Duration::from_millis(200)));
 
-        log::info!("Echo server waiting for connection...");
-        socket.accept(embassy_net::IpListenEndpoint::from(420u16)).await.unwrap();
-        log::info!("Accepted websocket connection from {}", socket.remote_endpoint().unwrap());
-
-        //Read data from Socket
-        let mut data = String::<1024>::new();
-        let mut buf = [0; 1024];
-        match socket.read(&mut buf).await {
-            Ok(n) => {
-                log::info!("Read {n} bytes: {}", core::str::from_utf8(&buf[..n]).unwrap());
-            }
-            Err(e) => {
-                log::info!("read error: {:?}", e);
-                continue;
-            }
-        };
-        //Get Sec-WebSocket-Key and append "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-        data.push_str(core::str::from_utf8(&buf).unwrap()).unwrap();
-        let mut to_be_hashed = String::<64>::new();
-        for line in data.lines(){
-            if line.starts_with("Sec-WebSocket-Key:"){
-                to_be_hashed.push_str(line.split(":").nth(1).unwrap().trim()).unwrap();
-                to_be_hashed.push_str("258EAFA5-E914-47DA-95CA-C5AB0DC85B11").unwrap();
-                break;
-            }
-        }
-        let to_be_hashed_len = to_be_hashed.len();
-        esp_println::println!("to_be_hashed({to_be_hashed_len}): {to_be_hashed}");
-        //hash with sha1
-        let hashed = compute_sha1(to_be_hashed.as_bytes());
-        esp_println::println!("Hashed: {}", sha1::sha1_bytes_2_str(&hashed));
-        //base64 encode
-        esp_println::println!("Encoded: {}", sha1::sha1_bytes_2_base64(&hashed));
-        //send back to client
-        let mut response = String::<142>::new();
-        for byte in _WS_ANSWER_.iter(){
-            response.push(*byte as char).unwrap();
-        }
-        response.push_str(&sha1::sha1_bytes_2_base64(&hashed)).unwrap();
-        response.push_str("\r\n\r\n").unwrap();
-        socket.write(response.as_bytes()).await.unwrap();
-
-        while socket.may_recv() {
-            if socket.read_ready().unwrap(){
-                match socket.read(&mut buf).await {
-                    Ok(n) => {
-                        log::info!("Websocket server recieved {n} bytes");
-                        if let Some(m) = websocket_unpack_clientframe(&mut buf[..n]){
-                            log::info!("{}", core::str::from_utf8(&buf[..m]).unwrap());
-                        }
-                        else{
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        log::info!("read error: {:?}", e);
-                        continue;
-                    }
-                };
-            }
-            Timer::after(Duration::from_millis(100)).await;
-        }
-        socket.close();
-        socket.flush().await.unwrap();
-        log::info!("Remote Host closed connection\n");
-    }
-}
-
-fn websocket_unpack_clientframe(data: &mut[u8]) -> Option<usize>{
-    if data.len() < 10{
-        log::warn!("Data is too short for websocket frame");
-        return None;
-    }
-    let payload_len: u64;
-    let payload_start: usize;
-    let mut mask_key = [0u8; 4];
-    if data[0] & 0x80 != 0x80{
-        log::warn!("Not a final websocket frame");
-    }
-    if data[0] & 0b01110000 != 0{
-        log::warn!("websocket frame uses unknown extension");
-        return None;
-    }
-    match data[0] & 0b1111{
-        0x0 => log::info!("Continuation frame"),
-        0x1 => log::info!("Text frame"),
-        0x2 => log::info!("Binary frame"),
-        0x8 => log::info!("Connection close frame"),
-        0x9 => log::info!("Ping frame"),
-        0xA => log::info!("Pong frame"),
-        _ => {
-            log::warn!("Unknown frame type");
-            return None;
-        }
-    }
-    if data[1] & 0x80 != 0x80{
-        log::warn!("Mask bit not set");
-        return None;
-    }
-    match data[1] & 0b01111111{
-        0x7E => {
-            payload_len = u64::from_be_bytes(data[2..4].try_into().unwrap());
-            payload_start = 8;
-            for i in 0..4{
-                mask_key[i] = data[i+4];
-            }
-        }
-        0x7F => {
-            payload_len = u64::from_be_bytes(data[2..10].try_into().unwrap());
-            payload_start = 14;
-            for i in 0..4{
-                mask_key[i] = data[i+10];
-            }
-        }
-        _ => {
-            payload_len = (data[1] & 0b01111111) as u64;
-            payload_start = 6;
-            for i in 0..4{
-                mask_key[i] = data[i+2];
-            }
-        }
-    }
-    if payload_len > (data.len() - payload_start) as u64{
-        log::warn!("Payload length is longer than data");
-        return None;
-    }
-    for i in payload_start..data.len(){
-        data[i-payload_start] = data[i] ^ mask_key[(i-payload_start) % 4];
-    }
-    Some(payload_len as usize)
-}
- */
 #[embassy_executor::task]
 pub async fn websocket_server(stack: &'static Stack<esp_wifi::wifi::WifiDevice<'static, esp_wifi::wifi::WifiStaDevice>>, 
                               control: &'static Signal<CriticalSectionRawMutex, messages::Message>){
@@ -213,39 +72,100 @@ pub async fn websocket_server(stack: &'static Stack<esp_wifi::wifi::WifiDevice<'
     }
 }
 
-#[embassy_executor::task]
-pub async fn run_http_server(stack: &'static Stack<esp_wifi::wifi::WifiDevice<'static, esp_wifi::wifi::WifiStaDevice>>) {
+pub const HTTP_SERVER_POOL_SIZE: usize = 2; 
+#[embassy_executor::task(pool_size = HTTP_SERVER_POOL_SIZE)]
+pub async fn http_server(stack: &'static Stack<esp_wifi::wifi::WifiDevice<'static, esp_wifi::wifi::WifiStaDevice>>, task_id: usize) {
+    const RX_BUF_LEN: usize = 1024;
+    const TX_BUF_LEN: usize = 8192; //the bigger the faster large files will load, should be between 4kb and 32kb for esp32 //Upper limit may be smaller (4kb ~ 250kb/s; 8kb ~ 400kb/s; 32kb  ~ 500 kb/s; 64kb ~ 500 kb/s)
+    let mut rx_buffer = [0; RX_BUF_LEN];
+    let mut tx_buffer = [0; TX_BUF_LEN];
     loop{
-        let mut rx_buffer = [0; 4096];
-        let mut tx_buffer = [0; 4096];
         let mut socket = embassy_net::tcp::TcpSocket::new(&stack, &mut rx_buffer, &mut tx_buffer);
         socket.set_timeout(Some(embassy_time::Duration::from_secs(10)));
         socket.set_keep_alive(Some(Duration::from_millis(200)));
-
-        log::info!("Waiting for http request...");
         socket.accept(embassy_net::IpListenEndpoint::from(80u16)).await.unwrap();
-        log::info!("Accepted http request from {}", socket.remote_endpoint().unwrap());
+        let remote_endpoint = socket.remote_endpoint().unwrap();
 
-        let mut buf = [0; 1024];
+        let mut buf = [0; RX_BUF_LEN];
+        let request;
+        let header;
         match socket.read(&mut buf).await {
             Ok(n) => {
-                log::info!("Read {n} bytes: {}", core::str::from_utf8(&buf[..n]).unwrap());
-            }
+                match core::str::from_utf8(&buf[..n]){
+                    Ok(ss) => {
+                        if let Some(n) = ss.find("\n"){
+                            request = ss.split_at(n).0.trim();
+                            header = ss.split_at(n).1.trim();
+                        }
+                        else{
+                            request = ss;
+                            header = "Empyt Header\n";
+                        }
+                    },
+                    Err(e) => {
+                        log::warn!("(HTTP Server {task_id}) read {n} invalid utf8 bytes: {:?}", e);
+                        socket.close();
+                        socket.flush().await.unwrap();
+                        continue;
+                    }
+                }
+            },
             Err(e) => {
-                log::info!("read error: {:?}", e);
+                log::warn!("(HTTP Server {task_id}) read error: {:?}", e);
+                socket.close();
+                socket.flush().await.unwrap();
                 continue;
             }
         };
+        log::info!("(HTTP Server {task_id}) received request from {remote_endpoint}: {request}");
+        log::debug!("(HTTP Server {task_id}) received header: \n{header}");
+        
+        let mut file2serve = None;
+        for file in client_app::CLIENT_APP_FILES.iter(){
+            if request.contains(file.0){
+                file2serve = Some(*file);
+                break;
+            }
+        }
+        
+        if let Some(f) = file2serve{
+            log::info!("(HTTP Server {task_id}) Serving {}", f.0);
+            match f.0.split(".").last(){
+                Some("js") => socket.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\n\r\n").await.unwrap(),
+                Some("wasm") => socket.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/wasm\r\n\r\n").await.unwrap(),
+                _ => socket.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n").await.unwrap(),
+            };
+            tcp_write_large(&mut socket, f.1).await.unwrap();
+        }
+        else if request.contains("GET / HTTP/1.1") || request.contains("GET /index.html HTTP/1.1"){
+            log::info!("(HTTP Server {task_id}) Serving index.html");
+            socket.write(b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n").await.unwrap();
+            tcp_write_large(&mut socket, client_app::INDEX_HTML).await.unwrap();
+        }
+        else{
+            log::info!("(HTTP Server {task_id}) Serving 404");
+            socket.write(b"HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\n404 Not Found").await.unwrap();
+        }
 
-        socket.write(b"ToDo").await.unwrap();
         socket.close();
         socket.flush().await.unwrap();
-        log::info!("Waiting for Remote Host to close connection...");
-        while socket.may_recv() {
-            Timer::after(Duration::from_millis(1000)).await;
-        }
-        log::info!("Remote Host closed connection\n");
+        log::info!("(HTTP Server {task_id}) connection closed\n");
     }
+}
+
+async fn tcp_write_large(socket: &mut embassy_net::tcp::TcpSocket<'_>, data: &[u8]) -> Result<(), embassy_net::tcp::Error> {
+    let mut sent = 0;
+    while sent < data.len() {
+        let len;
+        if sent + socket.send_capacity() < data.len() {
+            len = socket.send_capacity();
+        } else {
+            len = data.len() - sent;
+        }
+        let n = socket.write(&data[sent..(sent+len)]).await?;
+        sent += n;
+    }
+    Ok(())
 }
 
 #[embassy_executor::task]

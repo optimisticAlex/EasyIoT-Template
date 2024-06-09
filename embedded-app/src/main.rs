@@ -20,6 +20,7 @@ use static_cell::{make_static, StaticCell};
 
 mod web;
 mod worker;
+mod client_app; //generated at compile time by build.rs
 
 #[main]
 async fn main(spawner: embassy_executor::Spawner) -> ! {
@@ -66,23 +67,29 @@ async fn main(spawner: embassy_executor::Spawner) -> ! {
     let stack = &*make_static!(embassy_net::Stack::new(
         wifi_interface,
         wifi_config,
-        make_static!(embassy_net::StackResources::<3>::new()),
+        make_static!(embassy_net::StackResources::<5>::new()),
         seed
     ));
+
+    //Task communication
+    static LED_CTRL: StaticCell<Signal<CriticalSectionRawMutex, messages::Message>> = StaticCell::new();
+    let ctrl_signal = &*LED_CTRL.init(Signal::new());
     
     log::info!("Spawning wifi and network tasks...");
     spawner.spawn(web::wifi_connection(wifi_controller)).ok();
     spawner.spawn(web::net_task(stack)).ok();
     web::wait_for_wifi_connection(stack).await;
 
-    log::info!("Spawning other tasks...");
-    //spawner.spawn(web::run_http_server(&stack)).ok();
-    //spawner.spawn(web::websocket_echo_server(stack)).ok();
+    log::info!("Spawning {} HTTP servers with files:", web::HTTP_SERVER_POOL_SIZE);
+    esp_println::println!("index.html: {} Bytes", client_app::INDEX_HTML.len());
+    for file in client_app::CLIENT_APP_FILES.iter() {esp_println::println!("{}: {} Bytes", file.0, file.1.len());}
+    for i in 0..web::HTTP_SERVER_POOL_SIZE {spawner.spawn(web::http_server(&stack, i)).ok();}
 
-    static LED_CTRL: StaticCell<Signal<CriticalSectionRawMutex, messages::Message>> = StaticCell::new();
-    let ctrl_signal = &*LED_CTRL.init(Signal::new());
+    log::info!("Spawning websocket and worker task");
     spawner.spawn(web::websocket_server(stack, ctrl_signal)).ok();
     spawner.spawn(worker::worker_task(ctrl_signal, led_channel)).ok();
+
+    esp_println::println!("");//to brake up the log output
 
     loop{Timer::after(Duration::from_millis(100)).await;}
 }
