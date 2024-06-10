@@ -1,9 +1,6 @@
 
-//const _SSID: &str = "-_-";
-//const _PASSWORD: &str = "asdfmovie";
-const _SSID: &str = "Sicheres Muggle-WLAN 2.4";
-const _PASSWORD: &str = "Accio-Internet";
-
+const _SSID: &str = "-_-";
+const _PASSWORD: &str = "asdfmovie";
 
 use embassy_time::{Duration, Timer};
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
