@@ -45,7 +45,7 @@ pub async fn websocket_server(stack: &'static Stack<esp_wifi::wifi::WifiDevice<'
         let mut socket = WebSocket::new(embassy_net::tcp::TcpSocket::new(&stack, &mut rx_buffer, &mut tx_buffer));
     
         log::info!("Waiting for websocket connection...");
-        match socket.accept(embassy_net::IpListenEndpoint::from(420u16)).await {
+        match socket.accept(embassy_net::IpListenEndpoint::from(messages::MESSAGE_PORT)).await {
             Ok(_) => log::info!("Websocket connection established"),
             Err(e) => log::info!("Websocket connection failed: {:?}", e),
         }
